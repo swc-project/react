@@ -1406,9 +1406,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
       }),
     );
 
-    // The reply host fails this until consumed values keep their part.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip.each(['stream', 'iterable'])('%s in repeated stream items', type =>
+    it.each(['stream', 'iterable'])('%s in repeated stream items', type =>
       runGraph({
         nodes: {
           inner: {[type]: []},
@@ -1419,9 +1417,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
       }),
     );
 
-    // The reply host fails this until consumed values keep their part.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip.each(['stream', 'iterable'])(
+    it.each(['stream', 'iterable'])(
       '%s shared between different stream items',
       type =>
         runGraph({
@@ -1451,9 +1447,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         }));
     }
 
-    // The reply host fails this until consumed values keep their part.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('an iterator reused in later stream items', () =>
+    it('an iterator reused in later stream items', () =>
       runGraph({
         nodes: {
           value: {value: 'first'},
@@ -1613,9 +1607,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         roots: {entry: 'first', other: 'second'},
       }));
 
-    // The reply host fails this until consumed values keep their part.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('bytes in repeated stream items', () =>
+    it('bytes in repeated stream items', () =>
       runGraph({
         nodes: {
           inner: {bytes: 2},
@@ -1625,9 +1617,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         roots: {entry: 'outer', other: 'outer'},
       }));
 
-    // The reply host fails this until consumed values keep their part.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('bytes shared between different stream items', () =>
+    it('bytes shared between different stream items', () =>
       runGraph({
         nodes: {
           inner: {bytes: 2},

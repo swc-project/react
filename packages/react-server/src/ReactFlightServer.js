@@ -4265,7 +4265,7 @@ function renderModelDestructive(
       return serializeFormData(request, value);
     }
     if (value instanceof Error) {
-      return serializeErrorValue(request, value);
+      return serializeErrorValue(request, task, value);
     }
     if (value instanceof ArrayBuffer) {
       return serializeTypedArray(request, 'A', new Uint8Array(value), value);
@@ -4623,7 +4623,11 @@ function fatalError(request: Request, error: mixed): void {
   request.cacheController.abort(abortReason);
 }
 
-function serializeErrorValue(request: Request, error: Error): string {
+function serializeErrorValue(
+  request: Request,
+  task: Task,
+  error: Error,
+): string {
   if (__DEV__) {
     let name: string = 'Error';
     let message: string;
@@ -4647,8 +4651,37 @@ function serializeErrorValue(request: Request, error: Error): string {
     const errorInfo: ReactErrorInfoDev = {name, message, stack, env};
     if ('cause' in error) {
       const cause: ReactClientValue = error.cause as any;
-      const causeId = outlineModel(request, cause);
-      errorInfo.cause = serializeByValueID(causeId);
+      // The cause may be an object that was written already, including this
+      // very Error, so refer to that instead of outlining it again.
+      let causeEntry =
+        typeof cause === 'object' && cause !== null
+          ? request.writtenObjects.get(cause)
+          : undefined;
+      if (
+        causeEntry !== undefined &&
+        causeEntry.id < 0 &&
+        // $FlowFixMe[incompatible-type] The entry exists, so this is an object.
+        !tryReferToStreamItemEntry(request, task, causeEntry, cause)
+      ) {
+        causeEntry = undefined;
+      }
+      let causeReference;
+      if (causeEntry !== undefined) {
+        causeReference = causeEntry.reference;
+      } else {
+        const causeId = outlineModel(request, cause);
+        // Outlining the cause can register a reference for it. For an element
+        // that suspended, that reference is lazy, and it is the one to use.
+        causeEntry =
+          typeof cause === 'object' && cause !== null
+            ? request.writtenObjects.get(cause)
+            : undefined;
+        causeReference =
+          causeEntry !== undefined
+            ? causeEntry.reference
+            : serializeByValueID(causeId);
+      }
+      errorInfo.cause = causeReference;
     }
     if (
       typeof AggregateError !== 'undefined' &&
@@ -4697,8 +4730,16 @@ function serializeDebugErrorValue(
     if ('cause' in error) {
       counter.objectLimit--;
       const cause: ReactClientValue = error.cause as any;
-      const causeId = outlineDebugModel(request, counter, cause);
-      errorInfo.cause = serializeByValueID(causeId);
+      // The cause may be a value that is already being written, including
+      // this very Error, so refer to that instead of outlining it again.
+      const causeReference =
+        typeof cause === 'object' && cause !== null
+          ? request.writtenDebugObjects.get(cause)
+          : undefined;
+      errorInfo.cause =
+        causeReference !== undefined
+          ? causeReference
+          : serializeByValueID(outlineDebugModel(request, counter, cause));
     }
     if (
       typeof AggregateError !== 'undefined' &&
@@ -4706,8 +4747,14 @@ function serializeDebugErrorValue(
     ) {
       counter.objectLimit--;
       const errors: ReactClientValue = error.errors as any;
-      const errorsId = outlineDebugModel(request, counter, errors);
-      errorInfo.errors = serializeByValueID(errorsId);
+      const errorsReference =
+        typeof errors === 'object' && errors !== null
+          ? request.writtenDebugObjects.get(errors)
+          : undefined;
+      errorInfo.errors =
+        errorsReference !== undefined
+          ? errorsReference
+          : serializeByValueID(outlineDebugModel(request, counter, errors));
     }
     // +1 compared to the stack alone since errorInfo itself also counts
     // against the limit.

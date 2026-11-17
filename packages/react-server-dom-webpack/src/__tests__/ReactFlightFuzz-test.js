@@ -1068,9 +1068,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         }));
     }
 
-    // The reply host fails this until a Set or Map is created at its marker.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('Set containing itself', () =>
+    it('Set containing itself', () =>
       runGraph({
         nodes: {
           ready: {module: 'export-0'},
@@ -1079,9 +1077,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         roots: {entry: 'set', other: 'set'},
       }));
 
-    // The reply host fails this until a Set or Map is created at its marker.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('Map containing itself', () =>
+    it('Map containing itself', () =>
       runGraph({
         nodes: {
           ready: {module: 'export-0'},
@@ -1096,9 +1092,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         roots: {entry: 'map', other: 'map'},
       }));
 
-    // The reply host fails this until a Set or Map is created at its marker.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('two collections containing each other', () =>
+    it('two collections containing each other', () =>
       runGraph({
         nodes: {
           ready: {module: 'export-0'},
@@ -1691,9 +1685,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         roots: {entry: 'container', other: 'container'},
       }));
 
-    // The reply host fails this until a Set or Map is created at its marker.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('function bound to its Map', () =>
+    it('function bound to its Map', () =>
       runGraph({
         nodes: {
           ready: {module: 'export-0'},
@@ -1708,9 +1700,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         roots: {entry: 'container', other: 'container'},
       }));
 
-    // The reply host fails this until a Set or Map is created at its marker.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('cycle first exposed through a bound function', () =>
+    it('cycle first exposed through a bound function', () =>
       runGraph({
         nodes: {
           ready: {module: 'export-0'},
@@ -2360,15 +2350,6 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
                     ? [
                         ...unsupportedReplyOperations,
                         // These produce cases that fail for now.
-                        'self',
-                        'mutual',
-                        'duplicate',
-                        'map key',
-                        'promise',
-                        'stream',
-                        'canceled stream',
-                        'iterable',
-                        'root promise',
                         'undefined',
                         'colon',
                       ]
@@ -2388,8 +2369,8 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
       const scaled = generateScaleGraph(seed);
       const readTiming =
         readTimings[createRandom(seed + '/scale-demand')(readTimings.length)];
-      // Replies fail the cycle shape until a Set is created at its marker.
-      (host === 'reply' && scaled.shape === 'cycle' ? it.skip : it)(
+      it(
+        // eslint-disable-next-line jest/valid-title
         formatCaseName(
           scaled.shape + ' size=' + scaled.size,
           seed,
@@ -2653,10 +2634,7 @@ describe('ReactFlightFuzz (reply-temporary)', () => {
 
   describe('generated graphs', () => {
     seeds.forEach(seed => {
-      // Waits for the reply decoder to create a Set or Map where its marker
-      // is; generated cycles through Sets and Maps fail until then.
-      // eslint-disable-next-line jest/no-disabled-tests
-      it.skip('graph seed=' + seed, () =>
+      it('graph seed=' + seed, () =>
         runGraph(
           generateGraph(seed, {
             without: [

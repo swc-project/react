@@ -1733,9 +1733,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         roots: {entry: 'exposure', other: 'exposure'},
       }));
 
-    // The reply host fails this until FormData is decoded under its part id.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('FormData bound to a function in a larger graph', () =>
+    it('FormData bound to a function in a larger graph', () =>
       runGraph({
         nodes: {
           form: {special: 'form data'},

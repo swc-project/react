@@ -1466,9 +1466,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         roots: {entry: 'stream', other: 'stream'},
       }));
 
-    // The reply host fails this until entries after a stream ends are dropped.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('stream item with a failing module', () =>
+    it('stream item with a failing module', () =>
       runGraph({
         nodes: {
           broken: {module: 'export-0', fail: 'load'},
@@ -2181,9 +2179,7 @@ describe.each(['node', 'edge', 'reply'])('ReactFlightFuzz (%s)', host => {
         }),
     );
 
-    // The reply host fails this until entries after a stream ends are dropped.
-    // eslint-disable-next-line jest/no-disabled-tests
-    it.skip('a failed stream item behind an item that waits for another stream', () =>
+    it('a failed stream item behind an item that waits for another stream', () =>
       runGraph({
         nodes: {
           failing: {module: 'export-1', fail: 'load'},

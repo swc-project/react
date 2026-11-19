@@ -29,6 +29,7 @@ import {
   writeChunkAndReturn,
   stringToChunk,
   typedArrayToBinaryChunk,
+  isTypedArrayConsumed,
   byteLengthOfChunk,
   byteLengthOfBinaryChunk,
   completeWriting,
@@ -156,6 +157,7 @@ import {
 
 import ReactSharedInternals from './ReactSharedInternalsServer';
 import isArray from 'shared/isArray';
+import {escapePathSegment} from 'shared/ReactFlightReferencePath';
 import getPrototypeOf from 'shared/getPrototypeOf';
 import hasOwnProperty from 'shared/hasOwnProperty';
 import binaryToComparableString from 'shared/binaryToComparableString';
@@ -628,6 +630,10 @@ export type Request = {
   writtenClientReferences: Map<ClientReferenceKey, number>,
   writtenServerReferences: Map<ServerReference<any>, number>,
   writtenObjects: WeakMap<Reference, WrittenObjectEntry>,
+  // The stream items that were written as rows of their own.
+  streamItemRows: null | Set<number>,
+  // The error that the last failed stream item was reported with.
+  reportedItemError: null | {error: mixed, digest: string},
   writtenImportStrings: Map<string, string>,
   // The combined length of the keys in writtenImportStrings.
   writtenImportStringsSize: number,
@@ -761,6 +767,8 @@ function RequestInstance(
   this.writtenClientReferences = new Map();
   this.writtenServerReferences = new Map();
   this.writtenObjects = new WeakMap();
+  this.streamItemRows = null;
+  this.reportedItemError = null;
   this.writtenImportStrings = new Map();
   this.writtenImportStringsSize = 0;
   this.temporaryReferences = temporaryReferences;
@@ -1446,7 +1454,6 @@ function serializeReadableStream(
       callOnAllReadyIfReady(request);
     } else {
       try {
-        request.pendingChunks++;
         streamTask.model = entry.value;
         if (isByteStream) {
           // Chunks of byte streams are always Uint8Array instances.
@@ -1455,6 +1462,9 @@ function serializeReadableStream(
         } else {
           tryStreamTask(request, streamTask);
         }
+        // The row is counted once it has been written. If writing it throws,
+        // there is no row and nothing to count.
+        request.pendingChunks++;
         enqueueFlush(request);
         reader.read().then(progress, error);
       } catch (x) {
@@ -1500,7 +1510,11 @@ function serializeReadableStream(
     request.cacheController.signal.addEventListener('abort', abortStream);
     reader.read().then(progress, error);
   }
-  return serializeByValueID(streamTask.id);
+  const reference = serializeByValueID(streamTask.id);
+  // The stream is read once, so any other place that holds it gets the row
+  // it was already written to.
+  writeToDedupeMap(request, stream, streamTask.id, reference);
+  return reference;
 }
 
 function serializeAsyncIterable(
@@ -1584,8 +1598,10 @@ function serializeAsyncIterable(
     } else {
       try {
         streamTask.model = entry.value;
-        request.pendingChunks++;
         tryStreamTask(request, streamTask);
+        // The row is counted once it has been written. If writing it throws,
+        // there is no row and nothing to count.
+        request.pendingChunks++;
         enqueueFlush(request);
         if (__DEV__) {
           callIteratorInDEV(iterator, progress, error);
@@ -1645,7 +1661,11 @@ function serializeAsyncIterable(
       iterator.next().then(progress, error);
     }
   }
-  return serializeByValueID(streamTask.id);
+  const reference = serializeByValueID(streamTask.id);
+  // The iterator is read once, so any other place that holds the iterable
+  // gets the row it was already written to.
+  writeToDedupeMap(request, iterable, streamTask.id, reference);
+  return reference;
 }
 
 export function emitHint<Code: HintCode>(
@@ -2386,7 +2406,7 @@ function deferTask(request: Request, task: Task): ReactJSONValue {
   );
 
   pingTask(request, newTask);
-  return serializeLazyID(newTask.id);
+  return serializeLazyReference(request, task.model, newTask.id);
 }
 
 function outlineTask(request: Request, task: Task): ReactJSONValue {
@@ -2411,7 +2431,7 @@ function outlineTask(request: Request, task: Task): ReactJSONValue {
   }
   // This didn't complete synchronously so it wouldn't have even if we didn't
   // outline it, so this would reduce to a lazy reference even in prod.
-  return serializeLazyID(newTask.id);
+  return serializeLazyReference(request, task.model, newTask.id);
 }
 
 function outlineHaltedTask(
@@ -3468,8 +3488,8 @@ function resolveObjectForTee(
     if (copy === null) {
       if (
         teeChild !== child ||
-        // The client deletes keys whose value is undefined.
-        child === undefined ||
+        // The wire leaves out a key whose JSON value is undefined.
+        resolvedChild === undefined ||
         // The client drops own `__proto__` keys, e.g. from parsed JSON, so
         // a merge on SSR can't set a prototype.
         key === __PROTO__
@@ -3487,7 +3507,7 @@ function resolveObjectForTee(
       if (teeChild === NEEDS_DECODE) {
         teeChild = teeDispatcher.d(tee, copy, key, resolvedChild as any);
       }
-      if (teeChild !== undefined) {
+      if (resolvedChild !== undefined) {
         copy[key] = teeChild;
       }
     }
@@ -3582,8 +3602,8 @@ function copyObjectForTee(
       if (teeChild === NEEDS_DECODE) {
         teeChild = teeDispatcher.d(tee, copy, key, resolvedChild as any);
       }
-      // The client deletes keys whose value is undefined.
-      if (teeChild !== undefined) {
+      // The wire leaves out a key whose JSON value is undefined.
+      if (resolvedChild !== undefined) {
         copy[key] = teeChild;
       }
     }
@@ -3710,6 +3730,30 @@ function serializeByValueID(id: number): string {
 
 function serializeLazyID(id: number): string {
   return '$L' + id.toString(16);
+}
+
+function serializeLazyReference(
+  request: Request,
+  model: ReactClientValue,
+  id: number,
+): string {
+  const lazyReference = serializeLazyID(id);
+  // createTask registered the element by the new task's id. A later occurrence
+  // of the same element would otherwise make the model holding it wait for the
+  // component to render, even though it is reduced to a lazy here. Point those
+  // occurrences at the lazy reference too.
+  if (
+    typeof model === 'object' &&
+    model !== null &&
+    ((model as any).$$typeof === REACT_ELEMENT_TYPE ||
+      (model as any).$$typeof === REACT_LAZY_TYPE)
+  ) {
+    const entry = request.writtenObjects.get(model);
+    if (entry !== undefined && entry.reference === serializeByValueID(id)) {
+      writeToDedupeMap(request, model, id, lazyReference);
+    }
+  }
+  return lazyReference;
 }
 
 function serializePromiseID(id: number): string {
@@ -3942,6 +3986,9 @@ function outlineModelWithFormatContext(
     null, // have any context on the server but can on the client.
   );
   retryTask(request, newTask);
+  if (newTask.status !== COMPLETED) {
+    serializeLazyReference(request, value, newTask.id);
+  }
   return newTask.id;
 }
 
@@ -4126,18 +4173,36 @@ function serializeIterator(
   iterator: Iterator<ReactClientValue>,
 ): string {
   const id = outlineModel(request, Array.from(iterator));
-  return '$i' + id.toString(16);
+  const reference = '$i' + id.toString(16);
+  // The source iterator is exhausted. Later occurrences must reuse its
+  // contents even if the stream item that first held it was written inline.
+  writeToDedupeMap(request, iterator, id, reference);
+  return reference;
 }
 
 function serializeTypedArray(
   request: Request,
   tag: string,
   typedArray: $ArrayBufferView,
+  source: Reference,
 ): string {
   request.pendingChunks++;
   const bufferId = request.nextChunkId++;
-  emitTypedArrayChunk(request, bufferId, tag, typedArray, false);
-  return serializeByValueID(bufferId);
+  const isConsumed = emitTypedArrayChunk(
+    request,
+    bufferId,
+    tag,
+    typedArray,
+    false,
+  );
+  const reference = serializeByValueID(bufferId);
+  if (isConsumed) {
+    // Writing this row takes the buffer, so the bytes can't be written a
+    // second time. Any other place that holds the value refers to this row.
+    // A typed array that is copied keeps its bytes, so it can be written again.
+    writeToDedupeMap(request, source, bufferId, reference);
+  }
+  return reference;
 }
 
 function serializeDebugTypedArray(
@@ -4315,6 +4380,54 @@ function serializeImportString(request: Request, value: string): string {
 
 let modelRoot: null | ReactClientValue = false;
 
+// A stream item is written inside its stream's row, so it has no id that a
+// reference could name. We reserve an id for each item, and only write the
+// item as a row of its own if something ends up referring to it.
+type StreamItem = {
+  entryId: number,
+  isReferenced: boolean,
+  // An iterator inside an item can settle synchronously and write its own item.
+  parent: null | StreamItem,
+};
+
+let streamItem: null | StreamItem = null;
+// The task of the stream whose item is being written.
+let streamItemTask: null | Task = null;
+
+function tryReferToStreamItemEntry(
+  request: Request,
+  task: Task,
+  entry: WrittenObjectEntry,
+  value: Reference,
+): boolean {
+  let item = streamItem;
+  while (item !== null) {
+    if (entry.id === item.entryId) {
+      if ((value as any) !== modelRoot) {
+        item.isReferenced = true;
+      }
+      return true;
+    }
+    item = item.parent;
+  }
+  const rows = request.streamItemRows;
+  if (rows !== null && rows.has(entry.id)) {
+    return true;
+  }
+  if (task === streamItemTask) {
+    // This was written inline in an earlier item, and that copy can't be
+    // referred to. Outline it now, so that later items can refer to this row.
+    // This only dedupes from the third time on. Deduping from the second time
+    // would mean giving every item a row, which the client would have to keep.
+    const id = outlineModel(request, value as any);
+    entry.id = id;
+    entry.reference = serializeByValueID(id);
+    return true;
+  }
+  // Outside of a stream item, we write this again and remember it by path.
+  return false;
+}
+
 function renderModel(
   request: Request,
   task: Task,
@@ -4392,7 +4505,7 @@ function renderModel(
         task.implicitSlot = prevImplicitSlot;
 
         if (wasReactNode) {
-          return serializeLazyID(newTask.id);
+          return serializeLazyReference(request, task.model, newTask.id);
         }
         return serializeByValueID(newTask.id);
       }
@@ -4469,23 +4582,22 @@ function renderModelDestructive(
           // by another Server Component.
         } else {
           const existingEntry = writtenObjects.get(value);
-          if (existingEntry !== undefined) {
+          if (
+            existingEntry !== undefined &&
+            (existingEntry.id >= 0 ||
+              tryReferToStreamItemEntry(request, task, existingEntry, value))
+          ) {
             if (modelRoot === value) {
               // This is the ID we're currently emitting so we need to write it
               // once but if we discover it again, we refer to it by id.
               modelRoot = null;
             } else {
               // We've already emitted this as an outlined object, so we can refer to that by its
-              // existing ID. TODO: We should use a lazy reference since, unlike plain objects,
-              // elements might suspend so it might not have emitted yet even if we have the ID for
-              // it. However, this creates an extra wrapper when it's not needed. We should really
-              // detect whether this already was emitted and synchronously available. In that
-              // case we can refer to it synchronously and only make it lazy otherwise.
-              // We currently don't have a data structure that lets us see that though.
+              // existing ID. An element that suspended is remembered by a lazy reference, so
+              // referring to it does not wait for it. See serializeLazyReference.
               return existingEntry.reference;
             }
-          } else if (parentPropertyName.indexOf(':') === -1) {
-            // TODO: If the property name contains a colon, we don't dedupe. Escape instead.
+          } else {
             const parentEntry = writtenObjects.get(parent);
             if (parentEntry !== undefined) {
               // If the parent has a reference, we can refer to this object indirectly
@@ -4494,7 +4606,9 @@ function renderModelDestructive(
                 request,
                 value,
                 parentEntry.id,
-                parentEntry.reference + ':' + parentPropertyName,
+                parentEntry.reference +
+                  ':' +
+                  escapePathSegment(parentPropertyName),
               );
             }
           }
@@ -4715,7 +4829,11 @@ function renderModelDestructive(
       return promiseReference;
     }
 
-    if (existingEntry !== undefined) {
+    if (
+      existingEntry !== undefined &&
+      (existingEntry.id >= 0 ||
+        tryReferToStreamItemEntry(request, task, existingEntry, value))
+    ) {
       if (modelRoot === value) {
         if (existingEntry.reference !== serializeByValueID(task.id)) {
           // Turns out that we already have this root at a different reference.
@@ -4730,13 +4848,12 @@ function renderModelDestructive(
         // just refer to that by its existing ID.
         return existingEntry.reference;
       }
-    } else if (parentPropertyName.indexOf(':') === -1) {
-      // TODO: If the property name contains a colon, we don't dedupe. Escape instead.
+    } else {
       const parentEntry = writtenObjects.get(parent);
       if (parentEntry !== undefined) {
         // If the parent has a reference, we can refer to this object indirectly
         // through the property name inside that parent.
-        let propertyName = parentPropertyName;
+        let propertyName = escapePathSegment(parentPropertyName);
         if (isArray(parent) && parent[0] === REACT_ELEMENT_TYPE) {
           // For elements, we've converted it to an array but we'll have converted
           // it back to an element before we read the references so the property
@@ -4780,58 +4897,58 @@ function renderModelDestructive(
       return serializeFormData(request, value);
     }
     if (value instanceof Error) {
-      return serializeErrorValue(request, value);
+      return serializeErrorValue(request, task, value);
     }
     if (value instanceof ArrayBuffer) {
-      return serializeTypedArray(request, 'A', new Uint8Array(value));
+      return serializeTypedArray(request, 'A', new Uint8Array(value), value);
     }
     if (value instanceof Int8Array) {
       // char
-      return serializeTypedArray(request, 'O', value);
+      return serializeTypedArray(request, 'O', value, value);
     }
     if (value instanceof Uint8Array) {
       // unsigned char
-      return serializeTypedArray(request, 'o', value);
+      return serializeTypedArray(request, 'o', value, value);
     }
     if (value instanceof Uint8ClampedArray) {
       // unsigned clamped char
-      return serializeTypedArray(request, 'U', value);
+      return serializeTypedArray(request, 'U', value, value);
     }
     if (value instanceof Int16Array) {
       // sort
-      return serializeTypedArray(request, 'S', value);
+      return serializeTypedArray(request, 'S', value, value);
     }
     if (value instanceof Uint16Array) {
       // unsigned short
-      return serializeTypedArray(request, 's', value);
+      return serializeTypedArray(request, 's', value, value);
     }
     if (value instanceof Int32Array) {
       // long
-      return serializeTypedArray(request, 'L', value);
+      return serializeTypedArray(request, 'L', value, value);
     }
     if (value instanceof Uint32Array) {
       // unsigned long
-      return serializeTypedArray(request, 'l', value);
+      return serializeTypedArray(request, 'l', value, value);
     }
     if (value instanceof Float32Array) {
       // float
-      return serializeTypedArray(request, 'G', value);
+      return serializeTypedArray(request, 'G', value, value);
     }
     if (value instanceof Float64Array) {
       // double
-      return serializeTypedArray(request, 'g', value);
+      return serializeTypedArray(request, 'g', value, value);
     }
     if (value instanceof BigInt64Array) {
       // number
-      return serializeTypedArray(request, 'M', value);
+      return serializeTypedArray(request, 'M', value, value);
     }
     if (value instanceof BigUint64Array) {
       // unsigned number
       // We use "m" instead of "n" since JSON can start with "null"
-      return serializeTypedArray(request, 'm', value);
+      return serializeTypedArray(request, 'm', value, value);
     }
     if (value instanceof DataView) {
-      return serializeTypedArray(request, 'V', value);
+      return serializeTypedArray(request, 'V', value, value);
     }
     // TODO: Blob is not available in old Node. Remove the typeof check later.
     if (typeof Blob === 'function' && value instanceof Blob) {
@@ -5164,7 +5281,11 @@ function fatalError(request: Request, error: mixed): void {
   request.cacheController.abort(abortReason);
 }
 
-function serializeErrorValue(request: Request, error: Error): string {
+function serializeErrorValue(
+  request: Request,
+  task: Task,
+  error: Error,
+): string {
   if (__DEV__) {
     let name: string = 'Error';
     let message: string;
@@ -5188,8 +5309,37 @@ function serializeErrorValue(request: Request, error: Error): string {
     const errorInfo: ReactErrorInfoDev = {name, message, stack, env};
     if ('cause' in error) {
       const cause: ReactClientValue = error.cause as any;
-      const causeId = outlineModel(request, cause);
-      errorInfo.cause = serializeByValueID(causeId);
+      // The cause may be an object that was written already, including this
+      // very Error, so refer to that instead of outlining it again.
+      let causeEntry =
+        typeof cause === 'object' && cause !== null
+          ? request.writtenObjects.get(cause)
+          : undefined;
+      if (
+        causeEntry !== undefined &&
+        causeEntry.id < 0 &&
+        // $FlowFixMe[incompatible-type] The entry exists, so this is an object.
+        !tryReferToStreamItemEntry(request, task, causeEntry, cause)
+      ) {
+        causeEntry = undefined;
+      }
+      let causeReference;
+      if (causeEntry !== undefined) {
+        causeReference = causeEntry.reference;
+      } else {
+        const causeId = outlineModel(request, cause);
+        // Outlining the cause can register a reference for it. For an element
+        // that suspended, that reference is lazy, and it is the one to use.
+        causeEntry =
+          typeof cause === 'object' && cause !== null
+            ? request.writtenObjects.get(cause)
+            : undefined;
+        causeReference =
+          causeEntry !== undefined
+            ? causeEntry.reference
+            : serializeByValueID(causeId);
+      }
+      errorInfo.cause = causeReference;
     }
     if (
       typeof AggregateError !== 'undefined' &&
@@ -5238,8 +5388,16 @@ function serializeDebugErrorValue(
     if ('cause' in error) {
       counter.objectLimit--;
       const cause: ReactClientValue = error.cause as any;
-      const causeId = outlineDebugModel(request, counter, cause);
-      errorInfo.cause = serializeByValueID(causeId);
+      // The cause may be a value that is already being written, including
+      // this very Error, so refer to that instead of outlining it again.
+      const causeReference =
+        typeof cause === 'object' && cause !== null
+          ? request.writtenDebugObjects.get(cause)
+          : undefined;
+      errorInfo.cause =
+        causeReference !== undefined
+          ? causeReference
+          : serializeByValueID(outlineDebugModel(request, counter, cause));
     }
     if (
       typeof AggregateError !== 'undefined' &&
@@ -5247,8 +5405,14 @@ function serializeDebugErrorValue(
     ) {
       counter.objectLimit--;
       const errors: ReactClientValue = error.errors as any;
-      const errorsId = outlineDebugModel(request, counter, errors);
-      errorInfo.errors = serializeByValueID(errorsId);
+      const errorsReference =
+        typeof errors === 'object' && errors !== null
+          ? request.writtenDebugObjects.get(errors)
+          : undefined;
+      errorInfo.errors =
+        errorsReference !== undefined
+          ? errorsReference
+          : serializeByValueID(outlineDebugModel(request, counter, errors));
     }
     // +1 compared to the stack alone since errorInfo itself also counts
     // against the limit.
@@ -5834,7 +5998,7 @@ function emitTypedArrayChunk(
   tag: string,
   typedArray: $ArrayBufferView,
   debug: boolean,
-): void {
+): boolean {
   if (enableTaint) {
     if (TaintRegistryByteLengths.has(typedArray.byteLength)) {
       // If we have had any tainted values of this length, we check
@@ -5891,6 +6055,7 @@ function emitTypedArrayChunk(
       ),
     );
   }
+  return isTypedArrayConsumed(typedArray, binaryChunk);
 }
 
 function emitTextChunk(
@@ -6015,8 +6180,7 @@ function renderDebugModel(
         // We've already emitted this as a debug object. We favor that version if available.
         return existingDebugReference;
       }
-    } else if (parentPropertyName.indexOf(':') === -1) {
-      // TODO: If the property name contains a colon, we don't dedupe. Escape instead.
+    } else {
       const parentReference = writtenDebugObjects.get(parent);
       if (parentReference !== undefined) {
         // If the parent has a reference, we can refer to this object indirectly
@@ -6027,7 +6191,7 @@ function renderDebugModel(
           return serializeDeferredObject(request, value);
         }
 
-        let propertyName = parentPropertyName;
+        let propertyName = escapePathSegment(parentPropertyName);
         if (isArray(parent) && parent[0] === REACT_ELEMENT_TYPE) {
           // For elements, we've converted it to an array but we'll have converted
           // it back to an element before we read the references so the property
@@ -6065,9 +6229,13 @@ function renderDebugModel(
 
     const writtenObjects = request.writtenObjects;
     const existingEntry = writtenObjects.get(value);
-    if (existingEntry !== undefined) {
+    if (existingEntry !== undefined && existingEntry.id >= 0) {
       // We've already emitted this as a real object, so we can refer to that by its existing reference.
       // This might be slightly different serialization than what renderDebugModel would've produced.
+      // Remember the reference we actually emit. Referring through the debug
+      // parent instead would make later uses wait for that parent's other
+      // dependencies, even when this value is already available.
+      writtenDebugObjects.set(value, existingEntry.reference);
       return existingEntry.reference;
     }
 
@@ -6289,7 +6457,12 @@ function renderDebugModel(
 
     const iteratorFn = getIteratorFn(value);
     if (iteratorFn) {
-      return Array.from(value as any);
+      const iterator = iteratorFn.call(value);
+      if (iterator !== value) {
+        return Array.from(iterator as any);
+      }
+      // An iterator can only be read once, and the model that holds it will
+      // read it. Describe it by its shape below instead of consuming it.
     }
 
     const proto = getPrototypeOf(value);
@@ -7020,7 +7193,12 @@ function erroredTask(request: Request, task: Task, error: mixed): void {
     }
   }
   task.status = ERRORED;
-  const digest = logRecoverableError(request, error, task);
+  const reported = request.reportedItemError;
+  request.reportedItemError = null;
+  const digest =
+    reported !== null && reported.error === error
+      ? reported.digest
+      : logRecoverableError(request, error, task);
   emitErrorChunk(
     request,
     task.id,
@@ -7201,9 +7379,106 @@ function tryStreamTaskWithRequest(request: Request, task: Task): void {
     canEmitDebugInfo = false;
   }
   const parentSerializedSize = serializedSize;
+  const item = task.model;
+  if (
+    typeof item !== 'object' ||
+    item === null ||
+    !(
+      isArray(item) ||
+      getPrototypeOf(item) === ObjectPrototype ||
+      item instanceof Map ||
+      item instanceof Set
+    )
+  ) {
+    // Everything else is written the way any row is. A stream's entries share
+    // the stream's row, so a tee parses them.
+    try {
+      emitChunk(request, task, item, false);
+    } finally {
+      serializedSize = parentSerializedSize;
+      if (__DEV__) {
+        canEmitDebugInfo = prevCanEmitDebugInfo;
+      }
+    }
+    return;
+  }
+  const streamId = task.id;
+  const itemId = request.nextChunkId++;
+  const parentItem = streamItem;
+  const parentItemTask = streamItemTask;
+  const previousModelRoot = modelRoot;
+  let reserved: null | StreamItem = null;
+  streamItemTask = task;
+  // The item is written the way emitModelRowForWire writes a row, so a row
+  // built by value doesn't take it over.
+  const prevRowTee = rowTee;
+  if (enableFlightTee) {
+    rowTee = null;
+  }
   try {
-    emitChunk(request, task, task.model, false);
+    if (request.writtenObjects.get(item) === undefined) {
+      reserved = streamItem = {
+        entryId: -itemId,
+        isReferenced: false,
+        parent: parentItem,
+      };
+      // The id is negative to mark that it is only reserved.
+      writeToDedupeMap(request, item, -itemId, serializeByValueID(itemId));
+      // Make the item look like the model of the reserved row, so that it is
+      // written here and not as a reference to itself.
+      modelRoot = item;
+      task.id = itemId;
+    } else {
+      // The item was written before. It is written as a reference.
+      modelRoot = null;
+    }
+    // The rest is inlined from emitChunk, so that we can choose the row id
+    // once we know whether something referred to the item.
+    const resolvedModel = resolveModel(request, task, {'': item}, '', item);
+    task.id = streamId;
+    // $FlowFixMe[incompatible-type] stringify can return null for undefined but we never do
+    const json: string = stringify(resolvedModel);
+    if (reserved !== null && reserved.isReferenced) {
+      request.pendingChunks++;
+      emitModelChunk(request, itemId, json);
+      emitModelChunk(request, streamId, stringify(serializeByValueID(itemId)));
+    } else {
+      emitModelChunk(request, streamId, json);
+    }
+  } catch (x) {
+    task.id = streamId;
+    if (reserved !== null && reserved.isReferenced) {
+      // Something already refers to the reserved id. Write an error row for
+      // it, so that those references are rejected and don't wait forever.
+      request.pendingChunks++;
+      const digest = logRecoverableError(request, x, task);
+      emitErrorChunk(
+        request,
+        itemId,
+        digest,
+        x,
+        false,
+        __DEV__ ? task.debugOwner : null,
+      );
+      if (task.status === PENDING) {
+        // The stream fails with this error next. Don't report it twice.
+        request.reportedItemError = {error: x, digest};
+      }
+    }
+    throw x;
   } finally {
+    if (reserved !== null && reserved.isReferenced) {
+      if (request.streamItemRows === null) {
+        request.streamItemRows = new Set();
+      }
+      request.streamItemRows.add(-itemId);
+    }
+    streamItem = parentItem;
+    streamItemTask = parentItemTask;
+    modelRoot = previousModelRoot;
+    if (enableFlightTee) {
+      rowTee = prevRowTee;
+    }
     serializedSize = parentSerializedSize;
     if (__DEV__) {
       canEmitDebugInfo = prevCanEmitDebugInfo;

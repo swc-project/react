@@ -1317,26 +1317,40 @@ function initializeModelChunk<T>(chunk: ResolvedModelChunk<T>): void {
 // of the client parsing it from JSON. See `beginRow`.
 export type RowInitialization = {
   chunk: BlockedChunk<any>,
+  // What the chunk was before the row began, to restore if it aborts.
+  prevStatus: typeof PENDING | typeof PENDING_WEAK,
+  streamState: StreamState,
   resolveListeners: null | Array<InitializationReference | (any => mixed)>,
   rejectListeners: null | Array<InitializationReference | (mixed => mixed)>,
   prevHandler: null | InitializationHandler,
   prevChunk: null | BlockedChunk<any>,
+  // Set by `failRow` when a step of the build threw. The row then errors at
+  // `endRow`, as a model whose parse threw does.
+  errored: boolean,
+  error: mixed,
 };
 
 // Begins initializing the model row `id`, whose value the caller builds by
 // calling `parseModelString`, `beginElement` and `completeElement` before it
 // calls `endRow`. This does what `resolveModelChunk` and `initializeModelChunk`
-// do together, with the build in place of the parse. The row must not have
-// resolved yet. Rows can nest: each `beginRow` is paired with its own `endRow`.
+// do together, with the build in place of the parse. Returns null if the row
+// has already resolved, e.g. because it's a stream, so it can only be parsed,
+// or if the response has been garbage collected.
+// Rows can nest: each `beginRow` is paired with its own `endRow` or `abortRow`.
 export function beginRow(
   weakResponse: WeakResponse,
+  streamState: StreamState,
   id: number,
-): RowInitialization {
+): null | RowInitialization {
+  if (hasGCedResponse(weakResponse)) {
+    return null;
+  }
   const response = unwrapWeakResponse(weakResponse);
-  const chunk: PendingChunk<any> | PendingWeakChunk<any> = getChunk(
-    response,
-    id,
-  ) as any;
+  const chunk: SomeChunk<any> = getChunk(response, id);
+  if (chunk.status !== PENDING && chunk.status !== PENDING_WEAK) {
+    return null;
+  }
+  const prevStatus = chunk.status;
   releasePendingChunk(response, chunk);
   const resolveListeners = chunk.value;
   const rejectListeners = chunk.reason;
@@ -1344,11 +1358,24 @@ export function beginRow(
   const prevChunk = initializingChunk;
   return {
     chunk: beginChunkInitialization(response, chunk),
+    prevStatus,
+    streamState,
     resolveListeners,
     rejectListeners,
     prevHandler,
     prevChunk,
+    errored: false,
+    error: null,
   };
+}
+
+// Records that a step of a row's build threw. The caller keeps building, and
+// `endRow` errors the row with the first such error.
+export function failRow(row: RowInitialization, error: mixed): void {
+  if (!row.errored) {
+    row.errored = true;
+    row.error = error;
+  }
 }
 
 // Ends a row begun with `beginRow`, given the value the caller built. Listeners
@@ -1362,11 +1389,20 @@ export function endRow(
   const response = unwrapWeakResponse(weakResponse);
   const chunk = row.chunk;
   try {
+    if (row.errored) {
+      throw row.error;
+    }
     completeChunkInitialization(response, chunk, value);
   } catch (error) {
-    const erroredChunk: ErroredChunk<any> = chunk as any;
-    erroredChunk.status = ERRORED;
-    erroredChunk.reason = error;
+    if ((chunk as SomeChunk<any>).status === BLOCKED) {
+      // Also rejects the references that rows built inside this one queued
+      // on it. They can be reached without going through this row.
+      triggerErrorOnChunk(response, chunk, error);
+    } else {
+      const erroredChunk: ErroredChunk<any> = chunk as any;
+      erroredChunk.status = ERRORED;
+      erroredChunk.reason = error;
+    }
   } finally {
     initializingHandler = row.prevHandler;
     if ((enableProfilerTimer && enableComponentPerformanceTrack) || __DEV__) {
@@ -1380,6 +1416,53 @@ export function endRow(
       row.resolveListeners,
       row.rejectListeners,
     );
+  }
+  if (__DEV__) {
+    // After the listeners, like the listener `resolveModelChunk` adds.
+    resolveChunkDebugInfo(response, row.streamState, chunk);
+  }
+}
+
+function concatListeners<L>(
+  first: null | Array<L>,
+  second: null | Array<L>,
+): null | Array<L> {
+  if (first === null) {
+    return second;
+  }
+  if (second === null) {
+    return first;
+  }
+  return first.concat(second);
+}
+
+// Abandons a row begun with `beginRow` whose build threw. The row goes back to
+// pending, so the row the server emits for it next, usually an error, resolves
+// it as it would on the wire. It keeps the listeners it had before, and the
+// references that rows built inside it queued on it, since those rows can be
+// reached without going through this one.
+export function abortRow(
+  weakResponse: WeakResponse,
+  row: RowInitialization,
+): void {
+  const chunk: SomeChunk<any> = row.chunk;
+  initializingHandler = row.prevHandler;
+  if ((enableProfilerTimer && enableComponentPerformanceTrack) || __DEV__) {
+    initializingChunk = row.prevChunk;
+  }
+  if (chunk.status !== BLOCKED) {
+    return;
+  }
+  const pendingChunk: PendingChunk<any> | PendingWeakChunk<any> = chunk as any;
+  pendingChunk.status = row.prevStatus as any;
+  pendingChunk.value = concatListeners(row.resolveListeners, chunk.value);
+  pendingChunk.reason = concatListeners(row.rejectListeners, chunk.reason);
+  if (__DEV__ && row.prevStatus === PENDING) {
+    // `beginRow` released it. Retain the Response again while it waits.
+    const response = unwrapWeakResponse(weakResponse);
+    if (response._pendingChunks++ === 0) {
+      response._weakResponse.response = response;
+    }
   }
 }
 

@@ -1,11 +1,14 @@
 [package]
-name = "react_compiler_utils"
+name = "swc_fork_react_compiler_utils"
 description = "Shared utilities for the React Compiler"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[lib]
+name = "react_compiler_utils"
 
 [dependencies]
 indexmap = "2"

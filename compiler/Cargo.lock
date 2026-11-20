@@ -273,158 +273,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "react_compiler"
-version = "0.0.1-oidc.0"
-dependencies = [
- "indexmap",
- "react_compiler_ast",
- "react_compiler_diagnostics",
- "react_compiler_hir",
- "react_compiler_inference",
- "react_compiler_lowering",
- "react_compiler_optimization",
- "react_compiler_reactive_scopes",
- "react_compiler_ssa",
- "react_compiler_typeinference",
- "react_compiler_validation",
- "rustc-hash",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "react_compiler_ast"
-version = "0.0.1-oidc.0"
-dependencies = [
- "indexmap",
- "react_compiler_diagnostics",
- "rustc-hash",
- "serde",
- "serde-transcode",
- "serde_json",
- "similar",
- "walkdir",
-]
-
-[[package]]
-name = "react_compiler_diagnostics"
-version = "0.0.1-oidc.0"
-dependencies = [
- "rustc-hash",
- "serde",
-]
-
-[[package]]
-name = "react_compiler_hir"
-version = "0.0.1-oidc.0"
-dependencies = [
- "indexmap",
- "react_compiler_diagnostics",
- "rustc-hash",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "react_compiler_inference"
-version = "0.0.1-oidc.0"
-dependencies = [
- "indexmap",
- "react_compiler_diagnostics",
- "react_compiler_hir",
- "react_compiler_lowering",
- "react_compiler_optimization",
- "react_compiler_ssa",
- "react_compiler_utils",
- "rustc-hash",
-]
-
-[[package]]
-name = "react_compiler_lowering"
-version = "0.0.1-oidc.0"
-dependencies = [
- "indexmap",
- "react_compiler_ast",
- "react_compiler_diagnostics",
- "react_compiler_hir",
- "rustc-hash",
- "serde_json",
-]
-
-[[package]]
 name = "react_compiler_napi"
 version = "0.1.0"
 dependencies = [
  "napi",
  "napi-build",
  "napi-derive",
- "react_compiler",
- "react_compiler_ast",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "react_compiler_optimization"
-version = "0.0.1-oidc.0"
-dependencies = [
- "indexmap",
- "react_compiler_diagnostics",
- "react_compiler_hir",
- "react_compiler_lowering",
- "react_compiler_ssa",
- "rustc-hash",
-]
-
-[[package]]
-name = "react_compiler_reactive_scopes"
-version = "0.0.1-oidc.0"
-dependencies = [
- "hmac-sha256",
- "indexmap",
- "react_compiler_ast",
- "react_compiler_diagnostics",
- "react_compiler_hir",
- "rustc-hash",
- "serde_json",
-]
-
-[[package]]
-name = "react_compiler_ssa"
-version = "0.0.1-oidc.0"
-dependencies = [
- "indexmap",
- "react_compiler_diagnostics",
- "react_compiler_hir",
- "rustc-hash",
-]
-
-[[package]]
-name = "react_compiler_typeinference"
-version = "0.0.1-oidc.0"
-dependencies = [
- "react_compiler_diagnostics",
- "react_compiler_hir",
- "react_compiler_ssa",
- "rustc-hash",
-]
-
-[[package]]
-name = "react_compiler_utils"
-version = "0.0.1-oidc.0"
-dependencies = [
- "indexmap",
- "rustc-hash",
-]
-
-[[package]]
-name = "react_compiler_validation"
-version = "0.0.1-oidc.0"
-dependencies = [
- "indexmap",
- "react_compiler_diagnostics",
- "react_compiler_hir",
- "rustc-hash",
+ "swc_fork_react_compiler",
+ "swc_fork_react_compiler_ast",
 ]
 
 [[package]]
@@ -514,6 +372,148 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "swc_fork_react_compiler"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "swc_fork_react_compiler_ast",
+ "swc_fork_react_compiler_diagnostics",
+ "swc_fork_react_compiler_hir",
+ "swc_fork_react_compiler_inference",
+ "swc_fork_react_compiler_lowering",
+ "swc_fork_react_compiler_optimization",
+ "swc_fork_react_compiler_reactive_scopes",
+ "swc_fork_react_compiler_ssa",
+ "swc_fork_react_compiler_typeinference",
+ "swc_fork_react_compiler_validation",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_ast"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rustc-hash",
+ "serde",
+ "serde-transcode",
+ "serde_json",
+ "similar",
+ "swc_fork_react_compiler_diagnostics",
+ "walkdir",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_diagnostics"
+version = "0.1.0"
+dependencies = [
+ "rustc-hash",
+ "serde",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_hir"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rustc-hash",
+ "serde",
+ "serde_json",
+ "swc_fork_react_compiler_diagnostics",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_inference"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rustc-hash",
+ "swc_fork_react_compiler_diagnostics",
+ "swc_fork_react_compiler_hir",
+ "swc_fork_react_compiler_lowering",
+ "swc_fork_react_compiler_optimization",
+ "swc_fork_react_compiler_ssa",
+ "swc_fork_react_compiler_utils",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_lowering"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rustc-hash",
+ "serde_json",
+ "swc_fork_react_compiler_ast",
+ "swc_fork_react_compiler_diagnostics",
+ "swc_fork_react_compiler_hir",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_optimization"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rustc-hash",
+ "swc_fork_react_compiler_diagnostics",
+ "swc_fork_react_compiler_hir",
+ "swc_fork_react_compiler_lowering",
+ "swc_fork_react_compiler_ssa",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_reactive_scopes"
+version = "0.1.0"
+dependencies = [
+ "hmac-sha256",
+ "indexmap",
+ "rustc-hash",
+ "serde_json",
+ "swc_fork_react_compiler_ast",
+ "swc_fork_react_compiler_diagnostics",
+ "swc_fork_react_compiler_hir",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_ssa"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rustc-hash",
+ "swc_fork_react_compiler_diagnostics",
+ "swc_fork_react_compiler_hir",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_typeinference"
+version = "0.1.0"
+dependencies = [
+ "rustc-hash",
+ "swc_fork_react_compiler_diagnostics",
+ "swc_fork_react_compiler_hir",
+ "swc_fork_react_compiler_ssa",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_utils"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rustc-hash",
+]
+
+[[package]]
+name = "swc_fork_react_compiler_validation"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "rustc-hash",
+ "swc_fork_react_compiler_diagnostics",
+ "swc_fork_react_compiler_hir",
+]
 
 [[package]]
 name = "syn"

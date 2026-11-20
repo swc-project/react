@@ -1,11 +1,14 @@
 [package]
-name = "react_compiler_lowering"
+name = "swc_fork_react_compiler_lowering"
 description = "AST to HIR lowering for the React Compiler"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[lib]
+name = "react_compiler_lowering"
 
 [dependencies]
 react_compiler_ast.workspace = true

@@ -1,11 +1,14 @@
 [package]
-name = "react_compiler_ssa"
+name = "swc_fork_react_compiler_ssa"
 description = "SSA transformations for the React Compiler"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[lib]
+name = "react_compiler_ssa"
 
 [dependencies]
 react_compiler_diagnostics.workspace = true

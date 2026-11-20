@@ -10,8 +10,8 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "3", features = ["napi4"] }
 napi-derive = "3"
-react_compiler = { path = "../../../crates/react_compiler" }
-react_compiler_ast = { path = "../../../crates/react_compiler_ast" }
+react_compiler = { package = "swc_fork_react_compiler", path = "../../../crates/react_compiler" }
+react_compiler_ast = { package = "swc_fork_react_compiler_ast", path = "../../../crates/react_compiler_ast" }
 serde = "1"
 serde_json = { version = "1", features = ["unbounded_depth"] }
 

@@ -1,11 +1,14 @@
 [package]
-name = "react_compiler_hir"
+name = "swc_fork_react_compiler_hir"
 description = "High-level intermediate representation for the React Compiler"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+
+[lib]
+name = "react_compiler_hir"
 
 [dependencies]
 react_compiler_diagnostics.workspace = true

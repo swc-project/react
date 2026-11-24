@@ -7,7 +7,7 @@
  * @noflow
  * @nolint
  * @preventMunge
- * @generated SignedSource<<ff946fbac872fbaa6c0b243c1389720c>>
+ * @generated SignedSource<<e344e4238e95ab42c96df1ef1727d57f>>
  */
 
 /*
@@ -16259,7 +16259,7 @@ __DEV__ &&
                 "Expected finished root and lanes to be set. This is a bug in React."
               );
           var retry = resolveRetryWakeable.bind(null, finishedWork, wakeable);
-          wakeable.then(retry, retry);
+          attachContextPreservingListener(wakeable, retry);
         }
       });
     }
@@ -20982,7 +20982,25 @@ __DEV__ &&
         threadIDs.add(lanes),
         (pingCache = pingSuspendedRoot.bind(null, root, wakeable, lanes)),
         isDevToolsPresent && restorePendingUpdaters(root, lanes),
-        wakeable.then(pingCache, pingCache));
+        attachContextPreservingListener(wakeable, pingCache));
+    }
+    function attachContextPreservingListener(wakeable, listener) {
+      if (
+        "function" !== typeof Promise ||
+        null !== ReactSharedInternals.actQueue ||
+        isConcurrentActEnvironment()
+      )
+        wakeable.then(listener, listener);
+      else {
+        var resolve = noop$1;
+        new Promise(function (r) {
+          resolve = r;
+        }).then(listener);
+        listener = function () {
+          return resolve();
+        };
+        wakeable.then(listener, listener);
+      }
     }
     function pingSuspendedRoot(root, wakeable, pingedLanes) {
       var pingCache = root.pingCache;
@@ -32172,11 +32190,11 @@ __DEV__ &&
     };
     (function () {
       var isomorphicReactPackageVersion = React.version;
-      if ("19.3.0-native-fb-db4b90d4-20261121" !== isomorphicReactPackageVersion)
+      if ("19.3.0-native-fb-70d0f605-20261124" !== isomorphicReactPackageVersion)
         throw Error(
           'Incompatible React versions: The "react" and "react-dom" packages must have the exact same version. Instead got:\n  - react:      ' +
             (isomorphicReactPackageVersion +
-              "\n  - react-dom:  19.3.0-native-fb-db4b90d4-20261121\nLearn more: https://react.dev/warnings/version-mismatch")
+              "\n  - react-dom:  19.3.0-native-fb-70d0f605-20261124\nLearn more: https://react.dev/warnings/version-mismatch")
         );
     })();
     ("function" === typeof Map &&
@@ -32213,10 +32231,10 @@ __DEV__ &&
       !(function () {
         var internals = {
           bundleType: 1,
-          version: "19.3.0-native-fb-db4b90d4-20261121",
+          version: "19.3.0-native-fb-70d0f605-20261124",
           rendererPackageName: "react-dom",
           currentDispatcherRef: ReactSharedInternals,
-          reconcilerVersion: "19.3.0-native-fb-db4b90d4-20261121"
+          reconcilerVersion: "19.3.0-native-fb-70d0f605-20261124"
         };
         internals.overrideHookState = overrideHookState;
         internals.overrideHookStateDeletePath = overrideHookStateDeletePath;
@@ -32708,7 +32726,7 @@ __DEV__ &&
     exports.useFormStatus = function () {
       return resolveDispatcher().useHostTransitionStatus();
     };
-    exports.version = "19.3.0-native-fb-db4b90d4-20261121";
+    exports.version = "19.3.0-native-fb-70d0f605-20261124";
     "undefined" !== typeof __REACT_DEVTOOLS_GLOBAL_HOOK__ &&
       "function" ===
         typeof __REACT_DEVTOOLS_GLOBAL_HOOK__.registerInternalModuleStop &&

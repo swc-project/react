@@ -7,7 +7,7 @@
  * @noflow
  * @nolint
  * @preventMunge
- * @generated SignedSource<<5472840987edf1dea1d5a8873470c059>>
+ * @generated SignedSource<<6ad5898c0e2c99c8f72df4ebeb6c51a3>>
  */
 
 "use strict";
@@ -1009,6 +1009,7 @@ __DEV__ &&
           ? null
           : eventClass;
     }
+    function noop() {}
     function is(x, y) {
       return (x === y && (0 !== x || 1 / x === 1 / y)) || (x !== x && y !== y);
     }
@@ -2292,7 +2293,6 @@ __DEV__ &&
       for (var child = fiber.child; child; )
         (fiber.actualDuration += child.actualDuration), (child = child.sibling);
     }
-    function noop() {}
     function ensureRootIsScheduled(root) {
       root !== lastScheduledRoot &&
         null === root.next &&
@@ -10993,7 +10993,7 @@ __DEV__ &&
         if (!retryCache.has(wakeable)) {
           retryCache.add(wakeable);
           var retry = resolveRetryWakeable.bind(null, finishedWork, wakeable);
-          wakeable.then(retry, retry);
+          attachContextPreservingListener(wakeable, retry);
         }
       });
     }
@@ -13761,7 +13761,25 @@ __DEV__ &&
         ((workInProgressRootDidAttachPingListener = !0),
         threadIDs.add(lanes),
         (root = pingSuspendedRoot.bind(null, root, wakeable, lanes)),
-        wakeable.then(root, root));
+        attachContextPreservingListener(wakeable, root));
+    }
+    function attachContextPreservingListener(wakeable, listener) {
+      if (
+        "function" !== typeof Promise ||
+        null !== ReactSharedInternals.actQueue ||
+        isConcurrentActEnvironment()
+      )
+        wakeable.then(listener, listener);
+      else {
+        var resolve = noop;
+        new Promise(function (r) {
+          resolve = r;
+        }).then(listener);
+        listener = function () {
+          return resolve();
+        };
+        wakeable.then(listener, listener);
+      }
     }
     function pingSuspendedRoot(root, wakeable, pingedLanes) {
       var pingCache = root.pingCache;
@@ -16878,10 +16896,10 @@ __DEV__ &&
     (function () {
       var internals = {
         bundleType: 1,
-        version: "19.3.0-native-fb-db4b90d4-20261121",
+        version: "19.3.0-native-fb-70d0f605-20261124",
         rendererPackageName: "react-test-renderer",
         currentDispatcherRef: ReactSharedInternals,
-        reconcilerVersion: "19.3.0-native-fb-db4b90d4-20261121"
+        reconcilerVersion: "19.3.0-native-fb-70d0f605-20261124"
       };
       internals.overrideHookState = overrideHookState;
       internals.overrideHookStateDeletePath = overrideHookStateDeletePath;
@@ -17019,5 +17037,5 @@ __DEV__ &&
     exports.unstable_batchedUpdates = function (fn, a) {
       return fn(a);
     };
-    exports.version = "19.3.0-native-fb-db4b90d4-20261121";
+    exports.version = "19.3.0-native-fb-70d0f605-20261124";
   })();
